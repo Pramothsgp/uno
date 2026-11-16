@@ -1,0 +1,69 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Job id "build" is the required status check set by the platform ruleset.
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      IMAGE: ${{ vars.IMAGE }}:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npm run lint
+      - run: docker build -t "$IMAGE" .
+
+      - name: Authenticate to Google Cloud
+        if: github.event_name == 'push'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.CI_SA }}
+
+      - name: Push image
+        if: github.event_name == 'push'
+        run: |
+          gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
+          docker push "$IMAGE"
+
+      - name: Check out deployments repo
+        if: github.event_name == 'push'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/deployments
+          ssh-key: ${{ secrets.DEPLOYMENTS_DEPLOY_KEY }}
+          path: deployments
+
+      - name: Bump dev image
+        if: github.event_name == 'push'
+        working-directory: deployments
+        env:
+          FILE: apps/${{ github.event.repository.name }}/dev.yaml
+        run: |
+          git config user.name "ci-${{ github.event.repository.name }}"
+          git config user.email "ci@users.noreply.github.com"
+          for _ in 1 2 3; do
+            git pull --rebase --quiet
+            yq -i '.spec.template.spec.containers[0].image = strenv(IMAGE)' "$FILE"
+            git commit -qam "Deploy ${{ github.event.repository.name }} dev: ${GITHUB_SHA::7}" || exit 0
+            git push --quiet && exit 0
+            git reset -q --hard origin/main
+          done
+          exit 1
