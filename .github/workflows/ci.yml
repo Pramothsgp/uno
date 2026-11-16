@@ -19,9 +19,9 @@ jobs:
     env:
       IMAGE: ${{ vars.IMAGE }}:${{ github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -32,7 +32,7 @@ jobs:
 
       - name: Authenticate to Google Cloud
         if: github.event_name == 'push'
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.CI_SA }}
@@ -45,7 +45,7 @@ jobs:
 
       - name: Check out deployments repo
         if: github.event_name == 'push'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.repository_owner }}/deployments
           ssh-key: ${{ secrets.DEPLOYMENTS_DEPLOY_KEY }}
